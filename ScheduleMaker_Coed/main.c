@@ -14,9 +14,10 @@ typedef struct _coedteams{
 #define NUM_PLAYERS 10
 #define NUM_GAMES 15
 #define NUM_WEEKS 9
-#define MAX_ATTEMPTS 1000
-#define MAX_SCHEDULE_ATTEMPTS 100
+#define MAX_ATTEMPTS 200
+#define MAX_SCHEDULE_ATTEMPTS 20000
 #define MAX_REMOVED_TEAMS 1000
+#define MAX_REPEATS 3
 
 #define GUY 0
 #define GIRL 1
@@ -25,17 +26,17 @@ COEDTEAMS girls[NUM_PLAYERS];
 COEDTEAMS guys[NUM_PLAYERS];
 uint8_t all_teams[NUM_PLAYERS * NUM_PLAYERS];
 uint8_t all_teams_count[NUM_PLAYERS * NUM_PLAYERS];
+uint8_t all_teams_removed[NUM_PLAYERS * NUM_PLAYERS] = {0};
 uint8_t team_list[30] = {0};
-uint8_t num_repeat_partners = 0;
+uint8_t g_num_repeat_partners = 0;
 uint32_t g_count;
 uint16_t g_team_index = 0;
-uint16_t g_total_index = 99;
+uint16_t g_total_index;
 uint8_t g_week_counter = 1;
 uint16_t g_removed_teams_index = 0;
 
 uint8_t removed_teams[MAX_REMOVED_TEAMS] = {0};
-/*uint8_t removed_games[MAX_REMOVED_GAMES] =
-{
+/*{
     //Week 1
     0x16,0x27,0x38,0x49,0x5a,0x47,0x81,0x65,0x98,0x24,
     0x23,0x41,0xa9,0xa5,0x55,0x91,0x72,0x83,0x94,0xa3,
@@ -70,14 +71,17 @@ void remove_games(void);
 void remove_team(uint8_t team, uint8_t flag);
 uint16_t rand_interval(uint16_t min, uint16_t max);
 
+void DEBUG_delay(void);
+
 int main (int argc, char *argv[])
 {
     uint8_t flag = 1;
+    uint8_t remove_flag = 0;
     uint8_t i = 0;
     uint8_t girl, guy;
     uint8_t games = 0;
     FILE* fp;
-    num_repeat_partners = 3;
+    g_num_repeat_partners = 3;
 
     fp = fopen("schedule.txt", "w");
 
@@ -85,6 +89,13 @@ int main (int argc, char *argv[])
     {
         while(flag)
         {
+            fill_teams();
+            if(!remove_flag)
+            {
+                remove_games();
+                remove_flag = 1;
+            }
+
             if(create_coed_week_schedule())
             {
                 clear_schedule();
@@ -95,29 +106,33 @@ int main (int argc, char *argv[])
 
             if(g_count > MAX_SCHEDULE_ATTEMPTS)
             {
-                flag = 0;
-                printf("MAX_ATTEMPTS REACHED");
+                printf("\r\nMAX_ATTEMPTS REACHED\r\n");
                 return 0;
             }
             g_count++;
         }
 
         fprintf(fp, "****** Week %i ******\r\n", g_week_counter);
+        printf("****** Week %i ******\r\n", g_week_counter);
 
         while(games < NUM_GAMES)
         {
             girl = team_list[i] >> 4;
             guy = team_list[i] & 0x0F;
             fprintf(fp,"%i\t%i", girl, guy);
+            printf("%i\t%i", girl, guy);
 
             i++;
             fprintf(fp,"\tvs\t");
+            printf("\tvs\t");
 
             girl = team_list[i] >> 4;
             guy = team_list[i] & 0x0F;
             fprintf(fp,"%i\t%i", girl, guy);
+            printf("%i\t%i", girl, guy);
 
             fprintf(fp,"\r\n");
+            printf("\r\n");
 
             games++;
             i++;
@@ -127,15 +142,15 @@ int main (int argc, char *argv[])
         games = 0;
         i = 0;
         g_count = 0;
-        g_total_index = 99;
+        remove_flag = 0;
 
         fprintf(fp, "\r\n");
-        g_week_counter++;
         add_team_list_to_removed_teams();
         g_removed_teams_index += (NUM_GAMES * 2);
         clear_count();
         clear_schedule();
         clear_team_list();
+        g_week_counter++;
     }
 
     fclose(fp);
@@ -148,15 +163,15 @@ uint8_t create_coed_week_schedule(void)
     uint8_t indexA, indexB;
     uint8_t game = 0;
 
-    fill_teams();
-    remove_games();
     while(game < NUM_GAMES)
     {
         //Random Game
         if(select_teams(&teamA, &teamB, &indexA, &indexB))
         {
-            printf("\r                                                     ");
-            printf("\r\nATTEMPT: %i", g_count);
+            //printf("\r                                                     \r");
+            //printf("ATTEMPT: %i", g_count);
+            //DEBUG_delay();
+
             return 1;
         }
         //Checks
@@ -172,8 +187,8 @@ uint8_t create_coed_week_schedule(void)
             update_games(teamA,teamB);
 
             game++;
-            printf("\r                                                     ");
-            printf("\r\nGame %i Selected!", game);
+            //printf("\r                                                     ");
+            //printf("\r\nGame %i Selected!", game);
         }
     }
     return 0;
@@ -196,11 +211,11 @@ uint8_t select_teams(uint8_t *teamA, uint8_t *teamB, uint8_t *indexA, uint8_t *i
         counter++;
 
         flag = 0;
-        *indexA = rand_interval(0, g_total_index);
+        *indexA = rand_interval(0, g_total_index - 1);
         *teamA = all_teams[*indexA];
 
-        printf("\r                                                             \r");
-        printf("Attempt %i\tTeam A %x Team B %x", counter, *teamA, 0);
+        //printf("\r                                                             \r");
+        //printf("Attempt %i\tTeam A %x Team B %x", counter, *teamA, 0);
 
         girlA = *teamA >> 4;
         guyA = *teamA & 0x0F;
@@ -236,11 +251,11 @@ uint8_t select_teams(uint8_t *teamA, uint8_t *teamB, uint8_t *indexA, uint8_t *i
                 }
                 counter++;
                 flag = 0;
-                *indexB = rand_interval(0, g_total_index);
+                *indexB = rand_interval(0, g_total_index - 1);
                 *teamB = all_teams[*indexB];
 
-                printf("\r                                                             \r");
-                printf("Attempt %i\tTeam A [%x] Team B %x", counter, *teamA, *teamB);
+                //printf("\r                                                             \r");
+                //printf("Attempt %i\tTeam A [%x] Team B %x", counter, *teamA, *teamB);
 
                 girlB = *teamB >> 4;
                 guyB = *teamB & 0x0F;
@@ -269,8 +284,8 @@ uint8_t select_teams(uint8_t *teamA, uint8_t *teamB, uint8_t *indexA, uint8_t *i
                 //Passed First Checks, Check Game
                 if(!flag)
                 {
-                    printf("\r                                                             \r");
-                    printf("Attempt %i\tTeam A [%x] Team B [%x]", counter, *teamA, *teamB);
+                    //printf("\r                                                             \r");
+                    //printf("Attempt %i\tTeam A [%x] Team B [%x]", counter, *teamA, *teamB);
                     break;
                 }
             }
@@ -379,6 +394,7 @@ void fill_teams(void)
             counter++;
         }
     }
+    g_total_index = counter;
 }
 
 void clear_team_list(void)
@@ -501,7 +517,6 @@ void remove_team(uint8_t team, uint8_t flag)
                 {
                     index = i;
                     all_teams[i] = 0;
-                    all_teams_count[i] = 0;
                     fl = 1;
                 }
             }
@@ -513,7 +528,6 @@ void remove_team(uint8_t team, uint8_t flag)
                 {
                     index = i;
                     all_teams[i] = 0;
-                    all_teams_count[i] = 0;
                     fl = 1;
                 }
             }
@@ -538,9 +552,10 @@ void remove_team(uint8_t team, uint8_t flag)
             {
                 all_teams_count[i]++;
 
-                if(all_teams_count[i] >= num_repeat_partners)
+                if(all_teams_count[i] >= g_num_repeat_partners)
                 {
                     index = i;
+                    all_teams_removed[i] = all_teams[i];
                     all_teams[i] = 0;
                     all_teams_count[i] = 0;
                     for(i=index; i < g_total_index; i++)
@@ -577,9 +592,19 @@ void remove_team(uint8_t team, uint8_t flag)
 uint16_t rand_interval(uint16_t min, uint16_t max)
 {
     int16_t r;
-    uint16_t range = 1 + max - min;
-    uint16_t buckets = RAND_MAX / range;
-    uint16_t limit = buckets * range;
+    uint16_t range;
+    uint16_t buckets;
+    uint16_t limit;
+
+    range = 1 + max - min;
+
+    if(range == 0 || (range > RAND_MAX))
+    {
+        range = 1;
+    }
+
+    buckets = RAND_MAX / range;
+    limit = buckets * range;
 
     /* Create equal size buckets all in a row, then fire randomly towards
      * the buckets until you land in one of them. All buckets are equally
@@ -592,3 +617,15 @@ uint16_t rand_interval(uint16_t min, uint16_t max)
     return min + (r / buckets);
 }
 
+void DEBUG_delay(void)
+{
+    uint32_t i,j;
+
+    for(i=0; i < 2000; i++)
+    {
+        for(j=0; j < 100000; j++)
+        {
+
+        }
+    }
+}
