@@ -4,13 +4,6 @@
 #include <sys/time.h>
 #include <string.h>
 
-typedef struct _coedteams{
-    uint8_t player;
-    uint8_t partner[10];
-    uint8_t game_counter;
-} COEDTEAMS, *PCOEDTEAMS;
-
-
 #define NUM_PLAYERS 10
 #define NUM_GAMES 15
 #define NUM_WEEKS 9
@@ -18,12 +11,33 @@ typedef struct _coedteams{
 #define MAX_SCHEDULE_ATTEMPTS 20000
 #define MAX_REMOVED_TEAMS 1000
 #define MAX_REPEATS 3
+#define MAX_GAMES 30
 
 #define GUY 0
 #define GIRL 1
 
+typedef struct _coedteams{
+    uint8_t player;
+    uint8_t partner[10];
+    uint8_t game_counter;
+} COEDTEAMS, *PCOEDTEAMS;
+
+typedef struct _game{
+    uint8_t girlA;
+    uint8_t guyA;
+    uint8_t girlB;
+    uint8_t guyB;
+} GAME, *PGAME;
+
+typedef struct _schedule{
+    uint8_t week;
+    GAME games[MAX_GAMES];
+} SCHEDULE, *PSCHEDULE;
+
+SCHEDULE schedule[NUM_WEEKS];
 COEDTEAMS girls[NUM_PLAYERS];
 COEDTEAMS guys[NUM_PLAYERS];
+uint8_t remove_teams[NUM_PLAYERS * NUM_PLAYERS];
 uint8_t all_teams[NUM_PLAYERS * NUM_PLAYERS];
 uint8_t all_teams_count[NUM_PLAYERS * NUM_PLAYERS];
 uint8_t all_teams_removed[NUM_PLAYERS * NUM_PLAYERS] = {0};
@@ -33,7 +47,7 @@ uint32_t g_count;
 uint16_t g_team_index = 0;
 uint16_t g_total_index;
 uint8_t g_week_counter = 1;
-uint16_t g_removed_teams_index = 0;
+uint16_t g_removed_teams = 0;
 
 uint8_t removed_teams[MAX_REMOVED_TEAMS] = {0};
 /*{
@@ -61,8 +75,12 @@ uint8_t select_teams(uint8_t *teamA, uint8_t *teamB, uint8_t *indexA, uint8_t *i
 uint8_t create_team(uint8_t player, uint8_t partner);
 void update_games(uint8_t teamA, uint8_t teamB);
 uint8_t check_game(uint8_t teamA, uint8_t teamB);
+void add_team_list_to_schedule(uint8_t week);
 void add_team_list_to_removed_teams(void);
 void fill_teams(void);
+void fill_removed_teams(void);
+uint16_t check_game_count(void);
+uint8_t check_schedule(void);
 void clear_team_list(void);
 void clear_schedule(void);
 void clear_count(void);
@@ -76,30 +94,30 @@ void DEBUG_delay(void);
 int main (int argc, char *argv[])
 {
     uint8_t flag = 1;
-    uint8_t remove_flag = 0;
     uint8_t i = 0;
     uint8_t girl, guy;
     uint8_t games = 0;
+    uint16_t game_count = 0;
     FILE* fp;
     g_num_repeat_partners = 3;
 
     fp = fopen("schedule.txt", "w");
+
+    fill_removed_teams();
 
     while(g_week_counter <= NUM_WEEKS)
     {
         while(flag)
         {
             fill_teams();
-            if(!remove_flag)
-            {
-                remove_games();
-                remove_flag = 1;
-            }
+            remove_games();
 
             if(create_coed_week_schedule())
             {
                 clear_schedule();
                 clear_team_list();
+                game_count = 0;
+                game_count = check_game_count();
             }
             else
                 flag = 0;
@@ -142,17 +160,18 @@ int main (int argc, char *argv[])
         games = 0;
         i = 0;
         g_count = 0;
-        remove_flag = 0;
 
         fprintf(fp, "\r\n");
         add_team_list_to_removed_teams();
-        g_removed_teams_index += (NUM_GAMES * 2);
-        clear_count();
+        add_team_list_to_schedule(g_week_counter);
         clear_schedule();
         clear_team_list();
+        game_count = 0;
+        game_count = check_game_count();
         g_week_counter++;
     }
 
+    flag = check_schedule();
     fclose(fp);
     return 0;
 }
@@ -366,13 +385,37 @@ uint8_t check_game(uint8_t teamA, uint8_t teamB)
     return 1;
 }
 
-void add_team_list_to_removed_teams(void)
+void add_team_list_to_schedule(uint8_t week)
 {
     uint8_t i;
+    uint8_t index = 0;
+
+    schedule[week - 1].week = week;
+
+    for(i=0; i < NUM_GAMES; i++)
+    {
+        schedule[week - 1].games[i].girlA = (team_list[index] >> 4);
+        schedule[week - 1].games[i].guyA = (team_list[index] & 0x0F);
+        index++;
+        schedule[week - 1].games[i].girlB = (team_list[index] >> 4);
+        schedule[week - 1].games[i].guyB = (team_list[index] & 0x0F);
+        index++;
+    }
+}
+void add_team_list_to_removed_teams(void)
+{
+    uint8_t i,j;
+    uint16_t length = sizeof(all_teams_removed);
 
     for(i=0; i < sizeof(team_list); i++)
     {
-        removed_teams[i + g_removed_teams_index] = team_list[i];
+        for(j=0; j < length; j++)
+        {
+            if(all_teams_removed[j] == team_list[i])
+            {
+                all_teams_count[j]++;
+            }
+        }
     }
 }
 void fill_teams(void)
@@ -397,6 +440,62 @@ void fill_teams(void)
     g_total_index = counter;
 }
 
+void fill_removed_teams(void)
+{
+    uint8_t i,j;
+    uint16_t counter = 0;
+
+    //Fill Teams
+    for(i=0; i < NUM_PLAYERS; i++)
+    {
+        girls[i].player = i+1;
+        guys[i].player = i+1;
+
+        for(j=0; j < NUM_PLAYERS; j++)
+        {
+            girls[i].partner[j] = j+1;
+            guys[i].partner[j] = j+1;
+            all_teams_removed[counter]= create_team(girls[i].player, girls[i].partner[j]);
+            counter++;
+        }
+    }
+    g_total_index = counter;
+}
+
+uint8_t check_schedule(void)
+{
+  uint8_t i, j;
+  uint8_t girlA,girlB, guyA, guyB;
+
+  for(i=0; i < NUM_WEEKS; i++)
+  {
+      for(j=0; j < NUM_GAMES; j++)
+      {
+          girlA = schedule[i].games[j].girlA;
+          guyA = schedule[i].games[j].guyA;
+          girlB = schedule[i].games[j].girlB;
+          guyB = schedule[i].games[j].guyB;
+
+          girls[girlA - 1].partner[guyA - 1]++;
+          girls[girlB - 1].partner[guyB - 1]++;
+          guys[guyA - 1].partner[girlA - 1]++;
+          guys[guyB - 1].partner[girlB - 1]++;
+      }
+  }
+  return 1;
+}
+uint16_t check_game_count(void)
+{
+    uint16_t count = 0;
+    uint8_t i;
+
+    for(i=0; i < sizeof(all_teams_count); i++)
+    {
+        count += all_teams_count[i];
+    }
+
+    return count;
+}
 void clear_team_list(void)
 {
     uint8_t i;
@@ -491,9 +590,15 @@ void remove_games(void)
 {
     uint32_t i;
 
-    for(i=0; i < g_removed_teams_index; i++)
+    g_removed_teams = 0;
+
+    for(i=0; i < sizeof(all_teams_count); i++)
     {
-        remove_team(removed_teams[i], 1);
+        if(all_teams_count[i] > 2)
+        {
+            remove_team(all_teams_removed[i], 0);
+            g_removed_teams++;
+        }
     }
 
 }
@@ -537,36 +642,9 @@ void remove_team(uint8_t team, uint8_t flag)
                 for(i=index; i < g_total_index; i++)
                 {
                     all_teams[i] = all_teams[i+1];
-                    all_teams_count[i] = all_teams_count[i+1];
                 }
                 g_total_index--;
                 fl = 0;
-            }
-        }
-    }
-    else if(flag == 1)
-    {
-        for(i=0; i < sizeof(all_teams); i++)
-        {
-            if(all_teams[i] == team)
-            {
-                all_teams_count[i]++;
-
-                if(all_teams_count[i] >= g_num_repeat_partners)
-                {
-                    index = i;
-                    all_teams_removed[i] = all_teams[i];
-                    all_teams[i] = 0;
-                    all_teams_count[i] = 0;
-                    for(i=index; i < g_total_index; i++)
-                    {
-                        all_teams[i] = all_teams[i+1];
-                        all_teams_count[i] = all_teams_count[i+1];
-                    }
-
-                    g_total_index--;
-                }
-                break;
             }
         }
     }
